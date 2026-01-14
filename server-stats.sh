@@ -1,22 +1,41 @@
 #!/bin/bash
 
-# server-stats.sh - Enhanced server performance monitoring script
+# server-stats.sh - Enhanced server performance monitoring with alerts
+
+# ------------------- CONFIGURABLE THRESHOLDS -------------------
+CPU_WARNING=80          # % CPU usage → yellow warning
+CPU_CRITICAL=90         # % CPU usage → red critical
+
+DISK_WARNING=15         # % free space left → yellow
+DISK_CRITICAL=10        # % free space left → red
+
+MEM_WARNING=80          # % memory used → yellow
+MEM_CRITICAL=90         # % memory used → red
+# ---------------------------------------------------------------
+
+# Colors (only when outputting to terminal)
+if [ -t 1 ]; then
+    RED=$(tput setaf 1)
+    YELLOW=$(tput setaf 3)
+    GREEN=$(tput setaf 2)
+    RESET=$(tput sgr0)
+else
+    RED="" YELLOW="" GREEN="" RESET=""
+fi
 
 # Default values for options
 OUTPUT_FILE=""
 VERBOSE=false
 
-# Help/usage message
 usage() {
     echo "Usage: $0 [OPTIONS]"
     echo "Options:"
-    echo "  -o FILE    Output results to specified file (instead of terminal)"
-    echo "  -v         Verbose mode (shows more details)"
-    echo "  -h         Show this help message and exit"
+    echo "  -o FILE    Output results to specified file"
+    echo "  -v         Verbose mode (more details)"
+    echo "  -h         Show this help message"
     exit 1
 }
 
-# Parse command line options
 while getopts ":o:vh" opt; do
     case $opt in
         o) OUTPUT_FILE="$OPTARG" ;;
@@ -26,24 +45,30 @@ while getopts ":o:vh" opt; do
     esac
 done
 
-# If output file is specified, redirect all output to it
 if [ -n "$OUTPUT_FILE" ]; then
     exec > "$OUTPUT_FILE"
+    # No colors when redirecting to file
+    RED="" YELLOW="" GREEN="" RESET=""
 fi
 
-# Timestamp for the report
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
-# Header
-echo "Server Performance Statistics - Generated on: $TIMESTAMP"
-echo "===================================================="
+echo "${GREEN}Server Performance Statistics - Generated on: $TIMESTAMP${RESET}"
+echo "========================================================================="
 echo ""
 
-# Verbose mode info
 if $VERBOSE; then
     echo "[VERBOSE] Running in detailed mode"
     echo ""
 fi
+
+# Status tracking
+warnings=0
+criticals=0
+
+status_ok()    { echo "${GREEN}OK${RESET}"; }
+status_warning() { ((warnings++)); echo "${YELLOW}WARNING${RESET}"; }
+status_critical() { ((criticals++)); echo "${RED}CRITICAL${RESET}"; }
 
 # 1. System Information
 echo "=== System Information ==="
@@ -52,45 +77,66 @@ echo "OS: $(cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2)"
 echo "Kernel: $(uname -r)"
 echo "Uptime: $(uptime -p)"
 echo "Load Average: $(cat /proc/loadavg | awk '{print $1", "$2", "$3}')"
-echo "Logged-in Users: $(who | wc -l)"
 echo ""
 
-# 2. Total CPU Usage
+# 2. CPU Usage + Alert
 echo "=== CPU Usage ==="
-cpu_usage=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1"%"}')
-echo "Total CPU Usage: $cpu_usage"
+cpu_idle=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print $1}')
+cpu_usage=$(awk "BEGIN {print 100 - $cpu_idle}")
+echo -n "Total CPU Usage: $cpu_usage% → "
+if (( $(echo "$cpu_usage > $CPU_CRITICAL" | bc -l) )); then status_critical
+elif (( $(echo "$cpu_usage > $CPU_WARNING" | bc -l) )); then status_warning
+else status_ok; fi
 echo ""
 
-# 3. Memory Usage
+# 3. Memory Usage + Alert
 echo "=== Memory Usage ==="
-free -h | awk '/^Mem:/ {printf "Total: %s\nUsed:  %s (%.1f%%)\nFree:  %s (%.1f%%)\n", $2, $3, $3/$2*100, $4, $4/$2*100}'
+mem_total=$(free | awk '/^Mem:/ {print $2}')
+mem_used=$(free | awk '/^Mem:/ {print $3}')
+mem_used_pct=$(awk "BEGIN {printf \"%.1f\", $mem_used * 100 / $mem_total}")
+echo -n "Memory Used: $mem_used_pct% → "
+if (( $(echo "$mem_used_pct > $MEM_CRITICAL" | bc -l) )); then status_critical
+elif (( $(echo "$mem_used_pct > $MEM_WARNING" | bc -l) )); then status_warning
+else status_ok; fi
+echo "  (Total: $(free -h | awk '/^Mem:/ {print $2}'))"
 echo ""
 
-# 4. Disk Usage
-echo "=== Disk Usage ==="
-df -h | awk '$1 ~ /^\/dev\// {print $1 ": " $3 " used (" $5 "), " $4 " free"}'
+# 4. Disk Usage + Alert (checks root filesystem for simplicity)
+echo "=== Disk Usage (root filesystem) ==="
+disk_free_pct=$(df -h / | tail -1 | awk '{print $5}' | tr -d '%')
+disk_free_pct_num=${disk_free_pct%\%}
+echo -n "Root (/): $disk_free_pct used → "
+free_space_pct=$((100 - disk_free_pct_num))
+if [ $free_space_pct -le $DISK_CRITICAL ]; then status_critical
+elif [ $free_space_pct -le $DISK_WARNING ]; then status_warning
+else status_ok; fi
+echo "  ($free_space_pct% free)"
 echo ""
 
-# 5. Top 5 Processes by CPU Usage
-echo "=== Top 5 Processes by CPU Usage ==="
-ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%cpu | head -n 6
+# 5. Top 5 Processes by CPU
+echo "=== Top 5 Processes by CPU ==="
+ps -eo pid,ppid,cmd,%cpu --sort=-%cpu | head -n 6
 echo ""
 
-# 6. Top 5 Processes by Memory Usage
-echo "=== Top 5 Processes by Memory Usage ==="
-ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%mem | head -n 6
+# 6. Top 5 Processes by Memory
+echo "=== Top 5 Processes by Memory ==="
+ps -eo pid,ppid,cmd,%mem --sort=-%mem | head -n 6
 echo ""
 
-# 7. Failed Login Attempts (Last 24h)
-echo "=== Failed Login Attempts (Last 24h) ==="
-journalctl --since "24 hours ago" -t sshd | grep "Failed password" | wc -l | awk '{print $1 " failed login attempts"}'
+# Summary
+echo "=== Health Summary ==="
+if [ $criticals -gt 0 ]; then
+    echo "${RED}CRITICAL ISSUES DETECTED ($criticals)${RESET}"
+elif [ $warnings -gt 0 ]; then
+    echo "${YELLOW}WARNINGS FOUND ($warnings)${RESET}"
+else
+    echo "${GREEN}All systems OK${RESET}"
+fi
 echo ""
 
-# Optional: verbose extra info example
 if $VERBOSE; then
-    echo ""
-    echo "[VERBOSE] Current date/time detail:"
-    date
-    echo "[VERBOSE] Current working directory:"
-    pwd
+    echo "[VERBOSE] Extra info:"
+    echo "  - Thresholds: CPU warn>$CPU_WARNING%, crit>$CPU_CRITICAL%"
+    echo "  -           Mem  warn>$MEM_WARNING%, crit>$MEM_CRITICAL%"
+    echo "  -           Disk free warn<$DISK_WARNING%, crit<$DISK_CRITICAL%"
 fi
