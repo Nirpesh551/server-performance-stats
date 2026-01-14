@@ -1,9 +1,11 @@
 #!/bin/bash
 
 # server-stats.sh - A script to analyze basic server performance stats
+# Timestamp for report generation
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
-echo "Server Performance Statistics"
-echo "============================="
+echo "Server Performance Statistics - Generated on: $TIMESTAMP"
+echo "===================================================="
 echo ""
 
 # 1. System Information (stretch goal)
