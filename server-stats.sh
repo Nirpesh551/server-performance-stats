@@ -1,5 +1,8 @@
 #!/bin/bash
 
+AUTH_WARNING=5
+AUTH_CRITICAL=20
+ALLOWED_PORTS=("22" "80" "443")
 CPU_WARNING=80
 CPU_CRITICAL=90
 DISK_WARNING=15
@@ -116,6 +119,42 @@ elif [ $free_space_pct -le $DISK_WARNING ]; then
     ((warnings++))
 fi
 
+# --- Security Auditing: Failed SSH Logins ---
+failed_logins=$(journalctl -u sshd --since "1 hour ago" --no-pager 2>/dev/null | grep -i "Failed password" | wc -l)
+auth_status="OK"
+
+if [ "$failed_logins" -gt "$AUTH_CRITICAL" ]; then
+    auth_status="CRITICAL"
+    ((criticals++))
+    ALERT_MESSAGES="$ALERT_MESSAGES\n- CRITICAL SECURITY: $failed_logins failed SSH logins in the last hour!"
+elif [ "$failed_logins" -gt "$AUTH_WARNING" ]; then
+    auth_status="WARNING"
+    ((warnings++))
+fi
+
+# --- Security Auditing: Unauthorized Open Ports ---
+unauthorized_ports=""
+listening_ports=$(ss -tuln | awk 'NR>1 {print $5}' | awk -F':' '{print $NF}' | sort -u)
+
+for port in $listening_ports; do
+    is_allowed=false
+    for allowed in "${ALLOWED_PORTS[@]}"; do
+        if [ "$port" == "$allowed" ]; then
+            is_allowed=true
+            break
+        fi
+    done
+    if [ "$is_allowed" = false ]; then
+        unauthorized_ports="$unauthorized_ports $port"
+    fi
+done
+
+port_status="OK"
+if [ -n "$unauthorized_ports" ]; then
+    port_status="WARNING"
+    ((warnings++))
+    ALERT_MESSAGES="$ALERT_MESSAGES\n- SECURITY WARNING: Unauthorized open ports detected:$unauthorized_ports"
+fi
 
 if $JSON_MODE; then
     cat <<EOF
@@ -134,6 +173,12 @@ if $JSON_MODE; then
     "mem_status": "$mem_status",
     "disk_free_pct": $free_space_pct,
     "disk_status": "$disk_status"
+  },
+  "security": {
+    "failed_ssh_logins_1h": $failed_logins,
+    "auth_status": "$auth_status",
+    "unauthorized_ports": "$unauthorized_ports",
+    "port_status": "$port_status"
   },
   "health": {
     "warnings": $warnings,
@@ -160,6 +205,18 @@ else
 
     echo -n "Disk Free Space (/): $free_space_pct% → "
     [ "$disk_status" == "CRITICAL" ] && echo "${RED}CRITICAL${RESET}" || ([ "$disk_status" == "WARNING" ] && echo "${YELLOW}WARNING${RESET}" || echo "${GREEN}OK${RESET}")
+
+
+    echo -e "\n=== Security Audit ==="
+    echo -n "Failed SSH Logins (Last 1h): $failed_logins → "
+    [ "$auth_status" == "CRITICAL" ] && echo "${RED}CRITICAL${RESET}" || ([ "$auth_status" == "WARNING" ] && echo "${YELLOW}WARNING${RESET}" || echo "${GREEN}OK${RESET}")
+
+    echo -n "Unauthorized Listening Ports: "
+    if [ -n "$unauthorized_ports" ]; then
+        echo "${YELLOW}$unauthorized_ports${RESET}"
+    else
+        echo "${GREEN}None${RESET}"
+    fi
 
     echo -e "\n=== Service Health ==="
     for service in "${SERVICES[@]}"; do
