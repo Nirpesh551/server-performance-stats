@@ -65,27 +65,41 @@ OS=$(cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2)
 UPTIME=$(uptime -p)
 LOAD=$(cat /proc/loadavg | awk '{print $1", "$2", "$3}')
 
-cpu_idle=$(top -bn2 -d 0.2 | grep "Cpu(s)" | tail -n 1 | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print $1}')
-cpu_usage=$(awk "BEGIN {print 100 - $cpu_idle}")
+# --- CPU Calculation via Kernel (/proc/stat) ---
+read -r _ user nice system idle iowait irq softirq steal _ < /proc/stat
+prev_idle=$((idle + iowait))
+prev_total=$((user + nice + system + idle + iowait + irq + softirq + steal))
+
+sleep 0.5 
+
+read -r _ user nice system idle iowait irq softirq steal _ < /proc/stat
+idle_time=$((idle + iowait))
+total=$((user + nice + system + idle + iowait + irq + softirq + steal))
+
+cpu_usage=$(awk "BEGIN {printf \"%.1f\", 100 * (1 - (($idle_time - $prev_idle) / ($total - $prev_total)))}")
+
 cpu_status="OK"
-if (( $(echo "$cpu_usage > $CPU_CRITICAL" | bc -l) )); then 
+if awk "BEGIN {exit !($cpu_usage > $CPU_CRITICAL)}"; then
     cpu_status="CRITICAL"
     ((criticals++))
     ALERT_MESSAGES="$ALERT_MESSAGES\n- CPU Usage is Critical: $cpu_usage%"
-elif (( $(echo "$cpu_usage > $CPU_WARNING" | bc -l) )); then 
+elif awk "BEGIN {exit !($cpu_usage > $CPU_WARNING)}"; then
     cpu_status="WARNING"
     ((warnings++))
 fi
 
-mem_total=$(free | awk '/^Mem:/ {print $2}')
-mem_used=$(free | awk '/^Mem:/ {print $3}')
+# --- Memory Calculation via Kernel (/proc/meminfo) ---
+mem_total=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+mem_avail=$(awk '/MemAvailable/ {print $2}' /proc/meminfo)
+mem_used=$((mem_total - mem_avail))
 mem_used_pct=$(awk "BEGIN {printf \"%.1f\", $mem_used * 100 / $mem_total}")
+
 mem_status="OK"
-if (( $(echo "$mem_used_pct > $MEM_CRITICAL" | bc -l) )); then 
+if awk "BEGIN {exit !($mem_used_pct > $MEM_CRITICAL)}"; then
     mem_status="CRITICAL"
     ((criticals++))
     ALERT_MESSAGES="$ALERT_MESSAGES\n- Memory Usage is Critical: $mem_used_pct%"
-elif (( $(echo "$mem_used_pct > $MEM_WARNING" | bc -l) )); then 
+elif awk "BEGIN {exit !($mem_used_pct > $MEM_WARNING)}"; then
     mem_status="WARNING"
     ((warnings++))
 fi
