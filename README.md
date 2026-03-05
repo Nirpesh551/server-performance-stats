@@ -1,20 +1,22 @@
-# Server Performance Monitoring Script
+# DevSecOps Server & Security Monitor
 
-A professional-grade Bash utility to analyze key Linux server metrics, featuring active monitoring, JSON exporting, and automated webhook alerting.
+A professional-grade, zero-dependency Bash utility built to analyze key Linux server metrics, dynamically profile resource hogs, and audit system defense posture. 
 
 ![Bash](https://img.shields.io/badge/shell_script-%23121011.svg?style=for-the-badge&logo=gnu-bash&logoColor=white)
 ![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
+![Security](https://img.shields.io/badge/DevSecOps-Ready-blue?style=for-the-badge&logo=shield&logoColor=white)
 
-## Project URL
-**GitHub Repository:** [https://github.com/Nirpesh551/server-performance-stats](https://github.com/Nirpesh551/server-performance-stats)
+## Multi-Cloud Architecture
+This monitor is designed to secure and observe distributed, multi-cloud topologies. The intended deployment architecture routes monitoring across:
+* **Control Plane**
+* **Worker Nodes**
+## Top-Tier Features
 
-## Features
-- **Active Alerting**: Send critical threshold alerts directly to Discord or Slack via Webhooks.
-- **JSON Export Mode**: Seamlessly integrate output into APIs, databases, or dashboards.
-- **Service Health Checks**: Verify essential services (like Nginx, Docker, SSH) are actively running.
-- **CPU & Memory Analysis**: Accurate, real-time utilization percentages.
-- **Disk Monitoring**: Track root filesystem usage to prevent storage crashes.
-- **Color-Coded CLI**: Beautiful, human-readable terminal output.
+* **The "Blame Engine" (Process Profiling):** Doesn't just tell you CPU/Memory is high; dynamically captures and reports the exact PIDs and processes causing the spike.
+* **Active Security Auditing:** Parses system journals to detect SSH brute-force attempts and scans for unauthorized listening TCP ports.
+* **Defense Posture Validation:** Verifies that a firewall (UFW, firewalld, or iptables) is active and detects orphaned "Zombie" processes degrading performance.
+* **Zero-Dependency Native Metrics:** Bypasses brittle tools like `top` and `bc`. Calculates floating-point metrics natively reading from `/proc/stat` and `/proc/meminfo` using `awk`.
+* **JSON Export & Webhook Integration:** Seamlessly routes structured critical alerts to Discord/Slack webhooks or API endpoints.
 
 ## Quick Start
 
@@ -25,5 +27,8 @@ wget [https://raw.githubusercontent.com/Nirpesh551/server-performance-stats/main
 # 2. Make executable
 chmod +x server-stats.sh
 
-# 3. Run basic check
+# 3. Run full DevSecOps audit
 ./server-stats.sh
+
+# 4. Output strictly in JSON
+./server-stats.sh -j
